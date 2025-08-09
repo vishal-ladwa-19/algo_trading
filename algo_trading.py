@@ -7,7 +7,7 @@ Original file is located at
     https://colab.research.google.com/drive/1GD0p8mkwsiVDtlJb6WAelB1Am4ycgpyR
 """
 
-pip install yfinance pandas numpy ta matplotlib
+
 
 from google.colab import drive
 drive.mount('/content/drive')
@@ -167,7 +167,7 @@ print("\nSample Trades:\n", combined.head())
 
 """# **STEP 2**"""
 
-pip install gspread google-auth
+
 
 from google.colab import files
 uploaded = files.upload()  # Choose your downloaded JSON key file
