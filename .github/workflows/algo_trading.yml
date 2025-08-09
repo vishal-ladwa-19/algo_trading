@@ -1,0 +1,29 @@
+name: Daily Algo Trading Run
+
+on:
+  schedule:
+    - cron: '0 3 * * *'  # Runs daily at 3 AM UTC
+  workflow_dispatch:     # Manual trigger option
+
+jobs:
+  run-script:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install yfinance ta gspread google-auth
+
+      - name: Create service account key file
+        run: |
+          echo "${{ secrets.GDRIVE_KEY }}" > service_account.json
+
+      - name: Run backtest script
+        run: python your_script.py
