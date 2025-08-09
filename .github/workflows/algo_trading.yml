@@ -19,7 +19,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install yfinance ta gspread google-auth
+            pip install yfinance pandas numpy ta matplotlib gspread google-auth google-auth-oauthlib google-auth-httplib2
 
       - name: Create service account key file
         run: |
