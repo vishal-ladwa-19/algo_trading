@@ -1,64 +1,35 @@
+# algo_trading.py
 import os
-import datetime
+import yfinance as yf
 import pandas as pd
 import numpy as np
 import ta
 import matplotlib.pyplot as plt
-import yfinance as yf
-import logging
 import gspread
 from google.oauth2.service_account import Credentials
+import datetime
 
 # ---------------------------
 # Config
 # ---------------------------
-TICKERS = ["TCS.NS", "INFY.NS", "RELIANCE.NS"]   # Change if needed
+TICKERS = ["TCS.NS", "INFY.NS", "RELIANCE.NS"]
 PERIOD = "6mo"
 INTERVAL = "1d"
 RSI_WINDOW = 14
 SMA_SHORT = 20
 SMA_LONG = 50
 OUTPUT_DIR = "AlgoTrading"
-RESULTS_CSV = f"{OUTPUT_DIR}/Backtest_Results.csv"
-SHEET_NAME = "AlgoTradingLogs"   # Must match your Google Sheet name
-
-# ---------------------------
-# Setup
-# ---------------------------
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-
-# Google Sheets API Auth
-SERVICE_ACCOUNT_FILE = "service_account.json"
+SHEET_NAME = "AlgoTradingLogs"
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive"
 ]
 
-creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
-gc = gspread.authorize(creds)
-
-
-try:
-    sh = gc.open(SHEET_NAME)
-except gspread.SpreadsheetNotFound:
-    sh = gc.create(SHEET_NAME)
-    logging.info(f"Created sheet '{SHEET_NAME}'.")
-
-def ensure_worksheet(title, rows=1000, cols=20):
-    try:
-        ws = sh.worksheet(title)
-    except gspread.WorksheetNotFound:
-        ws = sh.add_worksheet(title=title, rows=rows, cols=cols)
-    return ws
-
-trade_ws = ensure_worksheet("TradeLog")
-summary_ws = ensure_worksheet("P&L Summary")
-win_ws = ensure_worksheet("WinRatio")
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # ---------------------------
-# Functions
+# Data Functions
 # ---------------------------
 def fetch_data(ticker: str) -> pd.DataFrame:
     df = yf.download(ticker, period=PERIOD, interval=INTERVAL, auto_adjust=True, progress=False)
@@ -70,7 +41,7 @@ def fetch_data(ticker: str) -> pd.DataFrame:
 def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     if isinstance(df.columns, pd.MultiIndex):
-        df.columns = [col[0] if isinstance(col, tuple) else col for col in df.columns]
+        df.columns = [col[0] for col in df.columns]
     for col in ['Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']:
         if col in df.columns:
             df[col] = df[col].astype(float).squeeze()
@@ -80,9 +51,12 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df['short_gt_long'] = df[f'SMA_{SMA_SHORT}'] > df[f'SMA_{SMA_LONG}']
     df['short_gt_long_prev'] = df['short_gt_long'].shift(1).fillna(False)
     df['cross_up'] = df['short_gt_long'] & (~df['short_gt_long_prev'])
-    df['cross_down'] = (~df['short_gt_long']) & df['short_gt_long_prev']
+    df['cross_down'] = (~df['short_gt_long']) & (df['short_gt_long_prev'])
     return df
 
+# ---------------------------
+# Backtesting
+# ---------------------------
 def backtest_df(df: pd.DataFrame, ticker: str):
     trades = []
     position = False
@@ -133,32 +107,37 @@ def summarize_trades(trades_df: pd.DataFrame):
         'Total_PnL%': round(trades_df['PnL_%'].sum(), 2)
     }
 
-def append_trades_to_sheet(trades_df: pd.DataFrame, worksheet):
-    if trades_df is None or trades_df.empty:
-        logging.info("No trades to append.")
+# ---------------------------
+# Google Sheets Integration
+# ---------------------------
+def init_gsheets():
+    creds = Credentials.from_service_account_file("service_account.json", scopes=SCOPES)
+    gc = gspread.authorize(creds)
+    try:
+        sh = gc.open(SHEET_NAME)
+    except gspread.SpreadsheetNotFound:
+        sh = gc.create(SHEET_NAME)
+    return sh
+
+def ensure_worksheet(sh, title):
+    try:
+        ws = sh.worksheet(title)
+    except gspread.WorksheetNotFound:
+        ws = sh.add_worksheet(title=title, rows=1000, cols=20)
+    return ws
+
+def append_trades_to_sheet(ws, trades_df):
+    if trades_df.empty:
+        print("No trades to append.")
         return
-    if not worksheet.get_all_values():
-        worksheet.append_row(list(trades_df.columns), value_input_option='USER_ENTERED')
-    worksheet.append_rows(trades_df.astype(str).values.tolist(), value_input_option='USER_ENTERED')
-    logging.info(f"Appended {len(trades_df)} trades to '{worksheet.title}'.")
+    if not ws.get_all_values():
+        ws.append_row(list(trades_df.columns))
+    ws.append_rows(trades_df.astype(str).values.tolist())
 
-def update_summary_to_sheet(summary_dict: dict, worksheet):
-    if not worksheet.get_all_values():
-        worksheet.append_row(["Run_Time"] + list(summary_dict.keys()), value_input_option='USER_ENTERED')
-    row = [datetime.datetime.now().isoformat()] + list(summary_dict.values())
-    worksheet.append_row(row, value_input_option='USER_ENTERED')
-    logging.info(f"Summary updated in '{worksheet.title}'.")
-
-def update_winratio_to_sheet(summary_dict: dict, worksheet):
-    win_dict = {
-        "Win%": summary_dict.get("Win%"),
-        "Trades": summary_dict.get("Trades")
-    }
-    if not worksheet.get_all_values():
-        worksheet.append_row(["Run_Time"] + list(win_dict.keys()), value_input_option='USER_ENTERED')
-    row = [datetime.datetime.now().isoformat()] + list(win_dict.values())
-    worksheet.append_row(row, value_input_option='USER_ENTERED')
-    logging.info(f"Win ratio updated in '{worksheet.title}'.")
+def append_summary_to_sheet(ws, summary):
+    if not ws.get_all_values():
+        ws.append_row(["Run_Time"] + list(summary.keys()))
+    ws.append_row([datetime.datetime.now().isoformat()] + list(summary.values()))
 
 # ---------------------------
 # Main
@@ -173,29 +152,22 @@ if __name__ == "__main__":
         trades_df = pd.DataFrame(trades)
         trades_df.to_csv(f"{OUTPUT_DIR}/{ticker}_trades.csv", index=False)
         all_trades.append(trades_df)
-
-        # Plot chart
         plt.figure(figsize=(10,5))
         plt.plot(df['Close'], label='Close')
         plt.plot(df[f'SMA_{SMA_SHORT}'], label=f'SMA{SMA_SHORT}')
         plt.plot(df[f'SMA_{SMA_LONG}'], label=f'SMA{SMA_LONG}')
-        if not trades_df.empty:
-            buy_dates = pd.to_datetime(trades_df['Entry_Date'])
-            plt.scatter(buy_dates, df.loc[buy_dates]['Close'], marker='^', color='g', label='Buy', s=100)
-        plt.title(f"{ticker} Signals")
         plt.legend()
         plt.savefig(f"{OUTPUT_DIR}/{ticker}_chart.png")
         plt.close()
 
-    # Combine and summarize
     combined = pd.concat(all_trades, ignore_index=True) if all_trades else pd.DataFrame()
-    combined.to_csv(RESULTS_CSV, index=False)
+    combined.to_csv(f"{OUTPUT_DIR}/Backtest_Results.csv", index=False)
     summary = summarize_trades(combined)
 
-    # Update Google Sheets
-    append_trades_to_sheet(combined, trade_ws)
-    update_summary_to_sheet(summary, summary_ws)
-    update_winratio_to_sheet(summary, win_ws)
+    sh = init_gsheets()
+    trade_ws = ensure_worksheet(sh, "TradeLog")
+    summary_ws = ensure_worksheet(sh, "P&L Summary")
+    append_trades_to_sheet(trade_ws, combined)
+    append_summary_to_sheet(summary_ws, summary)
 
-    logging.info("\n=== Backtest Summary ===")
-    logging.info(summary)
+    print("Backtest complete and results pushed to Google Sheets.")
