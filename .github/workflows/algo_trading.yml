@@ -26,4 +26,4 @@ jobs:
           echo "${{ secrets.GDRIVE_KEY }}" > service_account.json
 
       - name: Run backtest script
-        run: python your_script.py
+        run: python algo_trading.py
