@@ -29,14 +29,16 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 # Google Sheets API Auth
+SERVICE_ACCOUNT_FILE = "service_account.json"
+
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive"
 ]
-SERVICE_ACCOUNT_FILE = "service_account.json"  # Created from GitHub Actions secret
 
 creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
 gc = gspread.authorize(creds)
+
 
 try:
     sh = gc.open(SHEET_NAME)
