@@ -9,12 +9,10 @@ Original file is located at
 
 
 
-from google.colab import drive
-drive.mount('/content/drive')
 
 # Create a folder for outputs
 import os
-output_dir = "/content/drive/MyDrive/AlgoTrading"
+output_dir = "AlgoTrading"
 os.makedirs(output_dir, exist_ok=True)
 
 import yfinance as yf
@@ -169,7 +167,7 @@ print("\nSample Trades:\n", combined.head())
 
 
 
-from google.colab import files
+
 uploaded = files.upload()  # Choose your downloaded JSON key file
 service_account_file = list(uploaded.keys())[0]
 print("Using key file:", service_account_file)
@@ -200,7 +198,7 @@ try:
 except gspread.SpreadsheetNotFound:
     # create spreadsheet in the service account's Drive (then share it with your personal account if needed)
     sh = gc.create(SHEET_NAME)
-    print(f"Created sheet {SHEET_NAME}. You might want to share it with your main account to see it in Drive.")
+    print(f"Created sheet {SHEET_NAME}.")
 
 # 4) Ensure tabs exist (TradeLog, PnL Summary, WinRatio)
 def ensure_worksheet(title, rows=1000, cols=20):
