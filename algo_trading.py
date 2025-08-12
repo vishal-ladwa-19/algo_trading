@@ -1,5 +1,10 @@
 # algo_trading.py
+!pip install yfinance pandas numpy ta matplotlib gspread google-auth requests --quiet
+
+
 import os
+import datetime
+import requests
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -7,13 +12,12 @@ import ta
 import matplotlib.pyplot as plt
 import gspread
 from google.oauth2.service_account import Credentials
-import datetime
 
 # ---------------------------
-# Config
+# CONFIG
 # ---------------------------
 TICKERS = ["TCS.NS", "INFY.NS", "RELIANCE.NS"]
-PERIOD = "6mo"
+PERIOD = "2y"
 INTERVAL = "1d"
 RSI_WINDOW = 14
 SMA_SHORT = 20
@@ -21,15 +25,34 @@ SMA_LONG = 50
 OUTPUT_DIR = "AlgoTrading"
 SHEET_NAME = "AlgoTradingLogs"
 
+# Google Sheets
+SERVICE_ACCOUNT_FILE = "/content/steam-form-461313-s9-b44abfb03037.json"
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive"
 ]
 
+# Telegram
+TELEGRAM_BOT_TOKEN = "8357325778:AAFmFSYlcHFAmngAiBTMqjKL4uiZ-sEtvF8"
+TELEGRAM_CHAT_ID = "1279793310"
+
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # ---------------------------
-# Data Functions
+# TELEGRAM ALERT FUNCTION
+# ---------------------------
+def send_telegram_message(message):
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message}
+        r = requests.post(url, json=payload)
+        if r.status_code != 200:
+            print(f"Telegram error: {r.text}")
+    except Exception as e:
+        print(f"Failed to send Telegram message: {e}")
+
+# ---------------------------
+# DATA FUNCTIONS
 # ---------------------------
 def fetch_data(ticker: str) -> pd.DataFrame:
     df = yf.download(ticker, period=PERIOD, interval=INTERVAL, auto_adjust=True, progress=False)
@@ -55,20 +78,26 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 # ---------------------------
-# Backtesting
+# BACKTESTING
 # ---------------------------
 def backtest_df(df: pd.DataFrame, ticker: str):
     trades = []
     position = False
     entry_price, entry_date = None, None
-    df['Buy_Signal'] = (df['RSI_14'] < 30) & (df['cross_up'])
+    df['Buy_Signal'] = (df['RSI_14'] < 40) & (df['cross_up'])
+    
     for i in range(len(df) - 1):
         row, next_row = df.iloc[i], df.iloc[i+1]
+        
+        # Buy
         if not position and row['Buy_Signal']:
             if not np.isnan(next_row['Open']):
                 position = True
                 entry_price = float(next_row['Open'])
                 entry_date = df.index[i+1]
+                send_telegram_message(f"📈 BUY: {ticker} at {entry_price} on {entry_date.date()}")
+        
+        # Sell
         elif position:
             if (row['RSI_14'] > 60) or row['cross_down']:
                 exit_price = float(next_row['Open']) if not np.isnan(next_row['Open']) else float(row['Close'])
@@ -82,8 +111,11 @@ def backtest_df(df: pd.DataFrame, ticker: str):
                     'Exit_Price': round(exit_price, 2),
                     'PnL_%': round(pnl_pct, 2)
                 })
+                send_telegram_message(f"📉 SELL: {ticker} at {exit_price} on {exit_date.date()} | PnL: {pnl_pct:.2f}%")
                 position = False
                 entry_price, entry_date = None, None
+
+    # Close open position
     if position:
         last_close = float(df.iloc[-1]['Close'])
         pnl_pct = ((last_close - entry_price) / entry_price) * 100
@@ -108,10 +140,10 @@ def summarize_trades(trades_df: pd.DataFrame):
     }
 
 # ---------------------------
-# Google Sheets Integration
+# GOOGLE SHEETS
 # ---------------------------
 def init_gsheets():
-    creds = Credentials.from_service_account_file("service_account.json", scopes=SCOPES)
+    creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
     gc = gspread.authorize(creds)
     try:
         sh = gc.open(SHEET_NAME)
@@ -140,34 +172,46 @@ def append_summary_to_sheet(ws, summary):
     ws.append_row([datetime.datetime.now().isoformat()] + list(summary.values()))
 
 # ---------------------------
-# Main
+# MAIN SCRIPT
 # ---------------------------
 if __name__ == "__main__":
-    all_trades = []
-    for ticker in TICKERS:
-        df = fetch_data(ticker)
-        df = add_indicators(df)
-        df.to_csv(f"{OUTPUT_DIR}/{ticker}_with_indicators.csv")
-        trades = backtest_df(df, ticker)
-        trades_df = pd.DataFrame(trades)
-        trades_df.to_csv(f"{OUTPUT_DIR}/{ticker}_trades.csv", index=False)
-        all_trades.append(trades_df)
-        plt.figure(figsize=(10,5))
-        plt.plot(df['Close'], label='Close')
-        plt.plot(df[f'SMA_{SMA_SHORT}'], label=f'SMA{SMA_SHORT}')
-        plt.plot(df[f'SMA_{SMA_LONG}'], label=f'SMA{SMA_LONG}')
-        plt.legend()
-        plt.savefig(f"{OUTPUT_DIR}/{ticker}_chart.png")
-        plt.close()
+    try:
+        all_trades = []
+        for ticker in TICKERS:
+            df = fetch_data(ticker)
+            df = add_indicators(df)
+            df.to_csv(f"{OUTPUT_DIR}/{ticker}_with_indicators.csv")
+            trades = backtest_df(df, ticker)
+            trades_df = pd.DataFrame(trades)
+            trades_df.to_csv(f"{OUTPUT_DIR}/{ticker}_trades.csv", index=False)
+            all_trades.append(trades_df)
+            plt.figure(figsize=(10,5))
+            plt.plot(df['Close'], label='Close')
+            plt.plot(df[f'SMA_{SMA_SHORT}'], label=f'SMA{SMA_SHORT}')
+            plt.plot(df[f'SMA_{SMA_LONG}'], label=f'SMA{SMA_LONG}')
+            plt.legend()
+            plt.savefig(f"{OUTPUT_DIR}/{ticker}_chart.png")
+            plt.close()
 
-    combined = pd.concat(all_trades, ignore_index=True) if all_trades else pd.DataFrame()
-    combined.to_csv(f"{OUTPUT_DIR}/Backtest_Results.csv", index=False)
-    summary = summarize_trades(combined)
+        combined = pd.concat(all_trades, ignore_index=True) if all_trades else pd.DataFrame()
+        combined.to_csv(f"{OUTPUT_DIR}/Backtest_Results.csv", index=False)
+        summary = summarize_trades(combined)
 
-    sh = init_gsheets()
-    trade_ws = ensure_worksheet(sh, "TradeLog")
-    summary_ws = ensure_worksheet(sh, "P&L Summary")
-    append_trades_to_sheet(trade_ws, combined)
-    append_summary_to_sheet(summary_ws, summary)
+        print("\n=== BACKTEST RESULTS ===")
+        print(combined if not combined.empty else "No trades found.")
+        print("\n=== SUMMARY ===")
+        print(summary)
 
-    print("Backtest complete and results pushed to Google Sheets.")
+        # Push to Google Sheets
+        sh = init_gsheets()
+        trade_ws = ensure_worksheet(sh, "TradeLog")
+        summary_ws = ensure_worksheet(sh, "P&L Summary")
+        append_trades_to_sheet(trade_ws, combined)
+        append_summary_to_sheet(summary_ws, summary)
+
+        send_telegram_message("✅ Backtest complete and results pushed to Google Sheets.")
+        print("\nBacktest complete and results pushed to Google Sheets.")
+
+    except Exception as e:
+        send_telegram_message(f"❌ ERROR: {e}")
+        print(f"ERROR: {e}")
