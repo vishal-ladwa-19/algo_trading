@@ -6,3 +6,4 @@ matplotlib
 gspread
 google-auth
 requests
+scikit-learn
