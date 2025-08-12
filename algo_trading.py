@@ -1,3 +1,7 @@
+# algo_trading.py
+
+
+
 import os
 import datetime
 import requests
@@ -29,8 +33,8 @@ SCOPES = [
 ]
 
 # Telegram
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8357325778:AAFmFSYlcHFAmngAiBTMqjKL4uiZ-sEtvF8")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "1279793310")
+TELEGRAM_BOT_TOKEN = "8357325778:AAFmFSYlcHFAmngAiBTMqjKL4uiZ-sEtvF8"
+TELEGRAM_CHAT_ID = "1279793310"
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -38,9 +42,6 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 # TELEGRAM ALERT FUNCTION
 # ---------------------------
 def send_telegram_message(message):
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        print("Skipping Telegram message: Missing token or chat ID.")
-        return
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
         payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message}
@@ -56,29 +57,17 @@ def send_telegram_message(message):
 def fetch_data(ticker: str) -> pd.DataFrame:
     df = yf.download(ticker, period=PERIOD, interval=INTERVAL, auto_adjust=True, progress=False)
     if df.empty:
-        raise ValueError(f"No data returned for {ticker}")
-
-    # Flatten columns if MultiIndex
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = [col[0] if isinstance(col, tuple) else col for col in df.columns]
-
+        raise ValueError(f"No data for {ticker}")
     df.index = pd.to_datetime(df.index)
-
-    # Validate required columns
-    required_cols = ["Open", "High", "Low", "Close", "Volume"]
-    missing = [c for c in required_cols if c not in df.columns]
-    if missing:
-        raise ValueError(f"{ticker} data missing columns: {missing} | Got: {list(df.columns)}")
-
     return df
 
 def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
-
-    # Ensure numeric
-    for col in ["Open", "High", "Low", "Close", "Volume"]:
-        df[col] = pd.to_numeric(df[col], errors="coerce")
-
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = [col[0] for col in df.columns]
+    for col in ['Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']:
+        if col in df.columns:
+            df[col] = df[col].astype(float).squeeze()
     df['RSI_14'] = ta.momentum.RSIIndicator(close=df['Close'], window=RSI_WINDOW).rsi()
     df[f'SMA_{SMA_SHORT}'] = df['Close'].rolling(SMA_SHORT).mean()
     df[f'SMA_{SMA_LONG}'] = df['Close'].rolling(SMA_LONG).mean()
@@ -96,10 +85,10 @@ def backtest_df(df: pd.DataFrame, ticker: str):
     position = False
     entry_price, entry_date = None, None
     df['Buy_Signal'] = (df['RSI_14'] < 40) & (df['cross_up'])
-
+    
     for i in range(len(df) - 1):
         row, next_row = df.iloc[i], df.iloc[i+1]
-
+        
         # Buy
         if not position and row['Buy_Signal']:
             if not np.isnan(next_row['Open']):
@@ -107,7 +96,7 @@ def backtest_df(df: pd.DataFrame, ticker: str):
                 entry_price = float(next_row['Open'])
                 entry_date = df.index[i+1]
                 send_telegram_message(f"📈 BUY: {ticker} at {entry_price} on {entry_date.date()}")
-
+        
         # Sell
         elif position:
             if (row['RSI_14'] > 60) or row['cross_down']:
@@ -189,21 +178,14 @@ if __name__ == "__main__":
     try:
         all_trades = []
         for ticker in TICKERS:
-            try:
-                df = fetch_data(ticker)
-                df = add_indicators(df)
-            except Exception as e:
-                print(f"Error processing {ticker}: {e}")
-                send_telegram_message(f"❌ Error fetching {ticker}: {e}")
-                continue
-
+            df = fetch_data(ticker)
+            df = add_indicators(df)
             df.to_csv(f"{OUTPUT_DIR}/{ticker}_with_indicators.csv")
             trades = backtest_df(df, ticker)
             trades_df = pd.DataFrame(trades)
             trades_df.to_csv(f"{OUTPUT_DIR}/{ticker}_trades.csv", index=False)
             all_trades.append(trades_df)
-
-            plt.figure(figsize=(10, 5))
+            plt.figure(figsize=(10,5))
             plt.plot(df['Close'], label='Close')
             plt.plot(df[f'SMA_{SMA_SHORT}'], label=f'SMA{SMA_SHORT}')
             plt.plot(df[f'SMA_{SMA_LONG}'], label=f'SMA{SMA_LONG}')
@@ -221,15 +203,11 @@ if __name__ == "__main__":
         print(summary)
 
         # Push to Google Sheets
-        try:
-            sh = init_gsheets()
-            trade_ws = ensure_worksheet(sh, "TradeLog")
-            summary_ws = ensure_worksheet(sh, "P&L Summary")
-            append_trades_to_sheet(trade_ws, combined)
-            append_summary_to_sheet(summary_ws, summary)
-        except Exception as e:
-            print(f"Google Sheets error: {e}")
-            send_telegram_message(f"❌ Google Sheets error: {e}")
+        sh = init_gsheets()
+        trade_ws = ensure_worksheet(sh, "TradeLog")
+        summary_ws = ensure_worksheet(sh, "P&L Summary")
+        append_trades_to_sheet(trade_ws, combined)
+        append_summary_to_sheet(summary_ws, summary)
 
         send_telegram_message("✅ Backtest complete and results pushed to Google Sheets.")
         print("\nBacktest complete and results pushed to Google Sheets.")
