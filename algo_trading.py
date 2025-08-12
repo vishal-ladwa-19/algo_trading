@@ -26,7 +26,7 @@ OUTPUT_DIR = "AlgoTrading"
 SHEET_NAME = "AlgoTradingLogs"
 
 # Google Sheets
-SERVICE_ACCOUNT_FILE = "steam-form-461313-s9-b44abfb03037.json"
+SERVICE_ACCOUNT_FILE = "service_account.json"
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive"
