@@ -1,5 +1,5 @@
 # algo_trading.py
-!pip install yfinance pandas numpy ta matplotlib gspread google-auth requests --quiet
+
 
 
 import os
