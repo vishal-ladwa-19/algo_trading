@@ -1,33 +1,35 @@
-name: Algo Trading Automation
+name: Algo Trading Bot
 
 on:
+  workflow_dispatch:
   schedule:
-    - cron: "0 3 * * *" # Runs daily at 03:00 UTC
-  workflow_dispatch: # Allow manual run
+    - cron: "0 9 * * 1-5"   # Runs every weekday at 9 AM UTC
 
 jobs:
-  run-trading:
+  run-bot:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
+      - name: Checkout Repo
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: '3.11'
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install yfinance pandas numpy ta matplotlib gspread google-auth
+          pip install yfinance pandas numpy ta matplotlib gspread google-auth requests
 
       - name: Create service account key file
         run: |
-          echo '${{ secrets.GOOGLE_CREDENTIALS }}' > service_account.json
+          echo "${{ secrets.GSHEET_CREDENTIALS }}" > service_account.json
 
-      - name: Run backtest script
-        run: python algo_trading.py
-
-      
+      - name: Run algo_trading.py
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python algo_trading.py
